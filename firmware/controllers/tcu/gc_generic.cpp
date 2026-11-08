@@ -105,13 +105,19 @@ void GenericGearController::update() {
 			shiftTimer.reset();
 			switch (getDesiredGear()) {
 			case GEAR_1 :
-				setDesiredGear(GEAR_2);
+				if (engineConfiguration->totalGearsCount >= 2) setDesiredGear(GEAR_2);
 				break;
 			case GEAR_2 :
-				setDesiredGear(GEAR_3);
+				if (engineConfiguration->totalGearsCount >= 3) setDesiredGear(GEAR_3);
 				break;
 			case GEAR_3 :
-				setDesiredGear(GEAR_4);
+				if (engineConfiguration->totalGearsCount >= 4) setDesiredGear(GEAR_4);
+				break;
+			case GEAR_4 :
+				if (engineConfiguration->transmissionControllerMode == TransmissionControllerMode::SimpleTransmissionController && engineConfiguration->totalGearsCount >= 5) setDesiredGear(GEAR_5);
+				break;
+			case GEAR_5 :
+				if (engineConfiguration->transmissionControllerMode == TransmissionControllerMode::SimpleTransmissionController && engineConfiguration->totalGearsCount >= 6) setDesiredGear(GEAR_6);
 				break;
 			default:
 				break;
@@ -133,6 +139,12 @@ void GenericGearController::update() {
 				break;
 			case GEAR_4 :
 				setDesiredGear(GEAR_3);
+				break;
+			case GEAR_5 :
+				setDesiredGear(GEAR_4);
+				break;
+			case GEAR_6 :
+				setDesiredGear(GEAR_5);
 				break;
 			default:
 				break;
