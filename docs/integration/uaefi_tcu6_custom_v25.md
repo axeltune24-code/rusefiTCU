@@ -1,41 +1,55 @@
-# uaEFI TCU 6-speed + custom-v25 feature integration
+# uaEFI 6-Speed TCU + custom-v25: source-backed integration
 
-Baseline: `uaefi-6speed-tcu`, firmware commit `c2e86541a793d6fa02fef44f02abf19c05b2c527`.
+## Provenance
 
-Reference binary supplied by the user: `rusefi_custom-v25_2026-10-27_uaefi_387715127_local.bin`
-(780448 bytes, SHA-256 `ce2cb4b0805d4098386fa6040f7938f6b94f2a251922a1770e2001e6f9877adf`).
+Working TCU baseline: branch `uaefi-6speed-tcu`, commit
+`c2e86541a793d6fa02fef44f02abf19c05b2c527`.
 
-This binary is an **observational reference only**. It does not contain the human-readable
-source patches or TunerStudio definitions needed to reproduce these changes exactly.
-Do not flash it onto a 6-speed TCU as a substitute for a merged firmware build.
+User-provided verified V25 family archive: `uaEFI_Family_V25_20261027 (2).zip`.
+It contains exact source overlays, patches, INI and packaged BIN for uaEFI F407,
+uaEFI Pro F767 and Super uaEFI F767.
 
-## Feature checklist
+- F407 original base: rusEFI `23b6050c4ec9b1f406e49de1487fb1f9d2717676`;
+  source patch: `boards/uaEFI_F407/source/custom_source.patch`.
+- Super F767 original base: rusEFI `c903a0462ce11437c2b7accbc5ff89ac81d7dbda`;
+  source patch: `boards/Super_uaEFI_F767/source/source_from_official_c903a046.patch`.
+- `source/overlay/` contains complete V25 versions of affected C++ sources.
 
-- [ ] 1. Absolute cranking ignition advance: opt-in 4 RPM x 6 CLT table,
-      validate data and CLT, fall back to existing RPM curve.
-- [ ] 2. Time-based start air: hold / decay, new crank episode, TPS cancel with no rebound.
-- [ ] 3. Idle PID handoff near end of start-air transition, separate timing/fuel phases.
-- [x] 4. Suppress knock retard and trim in STOPPED, CRANKING, SPINNING_UP and
-      below knockSuppressMinTps; guard late ADC samples; keep threshold/gain updates.
-      Needs CI and bench verification.
-- [ ] 5. Spectrogram short-window zero padding, ADC metadata freeze, rate limiting,
-      shared diagnostic buffer and knock-before-FFT.
-- [ ] 6. STM32F7 RTC LSI->LSE watchdog-safe bounded switchover, calendar and bypass
-      preservation, LSI fallback.
-- [ ] 7. WBO heater permission from *valid* battery voltage and ignition power;
-      no USB-only heating; leave WBO internal safety protections intact.
-- [ ] 8. One-time Force O2 heating per confirmed ignition cycle, consumed on RUNNING.
-- [ ] 9. PPS accumulated error counter recovery after one second of *valid, redundant*,
-      released raw and filtered pedal with valid TPS; no other fault clearing.
-- [x] 10. uaEFI/SuperuaEFI DFCO uses measured TPS, 1% installed-pedal veto,
-       0.25 percentage-point TPS hysteresis on active fuel cut; other restrictions
-       untouched. Needs CI and bench verification.
+**DO NOT combine the BINs or reuse each other's MSQ/INI without generated
+migration.** V25 F407 uses 4 config pages (24460,256,2048,1268) and TCU6
+uses 5 (17764,256,2048,1268,8000). For example `tcuSolenoidTable` is
+at V25 offset 15352 but at TCU6 offset 7436.
 
-## Safety gates
+## Implementation status
 
-All ten must be coded, tested and reviewed before this branch can be considered
-a complete custom-v25 port. CI compilation of a BIN alone is not proof of correctness.
-Never replace existing six-speed calibration with a different BIN's flash/config
-layout, and never road-test without validating ETB, knock, heater, fuel-cut, RTC,
-and solenoid outputs on the bench. The existing transmission and tuner UI
-definitions must remain intact.
+| Feature | Work in this integration branch |
+|---|---|
+| 1. Absolute cranking RPM x CLT 4x6 | Ported from V25 to new config fields, UI, defaults and legacy fallback in commit `174a9d30`. CI/ABI migration review still required. |
+| 2. Post-start air hold/decay | Original reference: `post_start_air.h`, `idle_thread.cpp/.h`. Not ported. |
+| 3. Idle PID catch near end of start air | Original reference: `post_start_air.h`, `idle_thread.cpp/.h`. Not ported. |
+| 4. Knock correction inhibit | Adapted to newer API in commit `75c1c1dc`. Needs comparison to V25 source and hardware testing. |
+| 5. Knock spectrogram short windows | Original: `software_knock.cpp`, `fft.hpp`, board compile flags. Not ported. |
+| 6. F767 RTC LSE switch | Original: `stm32f7xx_rtc.cpp` from F767 overlay. Not ported. |
+| 7. WBO heat power permission | Original: `o2_heater_permission.h`, `engine.cpp`. Not ported. |
+| 8. One-shot Force O2 heat | Same original helper. Not ported. |
+| 9. PPS fault-counter recovery | Original: `pedal_fault_recovery.h`, `electronic_throttle.cpp`. Not ported. |
+| 10. DFCO measured TPS / pedal veto | Adapted to newer API in commit `75c1c1dc`. Needs comparison to V25 source and hardware testing. |
+
+All original source content can be retrieved from the supplied archive; do not
+attempt to infer it from compiled BIN bytes.
+
+## Build / release requirements
+
+1. Preserve 6-speed automatic and button shifting 1-6, solenoid commands,
+   configured gear count, and TCU/Boost/ETB TunerStudio menus.
+2. Port sources to the later TCU6 firmware API *with reviews*, not wholesale
+   replacement of unrelated engine modules with the older V25 tree.
+3. Generate new firmware config and TS INI together; verify signatures, offsets,
+   and explicit calibration migration. Features should be disabled by default.
+4. Run Linux/Windows unit tests and simulator tests, including new cranking,
+   idle, knock, DFCO, PPS, WBO and RTC tests.
+5. Test the resulting *combined* uaEFI firmware on a load-safe bench before
+   installing it on a running engine or transmission.
+
+The user's separate V25 and TCU6 variants were reportedly bench tested and
+working. This does NOT establish that the merged variant has been tested.
