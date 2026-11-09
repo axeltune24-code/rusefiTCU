@@ -12,6 +12,7 @@ public:
 private:
 	void updateLinePressure(gear_e gear);
 	gear_e pressureShiftFrom = NEUTRAL;
+	Timer pressureShiftTimer;
 	TransmissionControllerMode getMode() const {
 		return TransmissionControllerMode::SimpleTransmissionController;
 	}
