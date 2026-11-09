@@ -288,3 +288,77 @@ TEST(Knock, SuppressesRetardDuringCrankingAndLowTps) {
 	dut.onKnockSenseCompleted(0, 30, 0);
 	EXPECT_FLOAT_EQ(0, dut.getKnockRetard());
 }
+
+#include "../../firmware/controllers/algo/o2_heater_permission.h"
+#include "../../firmware/controllers/actuators/post_start_air.h"
+#include "../../firmware/controllers/actuators/pedal_fault_recovery.h"
+#include "../../firmware/controllers/algo/ignition/cranking_clt.h"
+#include "../../firmware/controllers/sensors/impl/fft/knock_window.h"
+
+TEST(V25, PostStartAirRequiresCrankingAndDoesNotReboundAfterPedal) {
+	PostStartAir air;
+	air.update(0, false, false, true, true, false, 0.5f, 2.0f);
+	EXPECT_FLOAT_EQ(1, air.fraction());
+	air.reset();
+	air.update(0, false, true, false, true, false, 0.5f, 2.0f);
+	air.update(100000, false, false, true, true, false, 0.5f, 2.0f);
+	EXPECT_FLOAT_EQ(0, air.fraction());
+	air.update(800000, false, false, true, true, false, 0.5f, 2.0f);
+	const float before = air.fraction();
+	EXPECT_GT(before, 0);
+	air.update(900000, false, false, true, true, true, 0.5f, 2.0f);
+	air.update(1300000, false, false, true, true, false, 0.5f, 2.0f);
+	const float after = air.fraction();
+	EXPECT_GE(after, before);
+	air.update(4000000, false, false, true, true, false, 0.5f, 2.0f);
+	EXPECT_FLOAT_EQ(1, air.fraction());
+	air.update(5000000, true, false, false, true, false, 0.5f, 2.0f);
+	EXPECT_FLOAT_EQ(1, air.fraction());
+	EXPECT_FALSE(PostStartAir::configured(0, 0));
+}
+
+TEST(V25, O2HeaterNeedsRealPowerAndConsumesForcedCycle) {
+	O2HeaterPermission heat;
+	EXPECT_FALSE(heat.update(0, true, false, true, true, true, 5.0f));
+	EXPECT_FALSE(heat.update(100000, true, false, false, true, true, 12.5f));
+	EXPECT_TRUE(heat.update(200000, true, false, true, true, true, 12.5f));
+	EXPECT_TRUE(heat.forceActive());
+	EXPECT_TRUE(heat.update(250000, true, true, true, true, true, 12.5f));
+	EXPECT_FALSE(heat.forceActive());
+	EXPECT_FALSE(heat.update(300000, true, false, true, true, true, 12.5f));
+	// Transient starter sag is not proof of a new ignition cycle.
+	EXPECT_FALSE(heat.update(450000, true, false, false, true, true, 5.5f));
+	EXPECT_FALSE(heat.update(700000, true, false, true, true, true, 12.5f));
+	heat.update(800000, true, false, false, true, true, 12.5f, true);
+	heat.update(1400000, true, false, false, true, true, 12.5f, true);
+	EXPECT_TRUE(heat.update(1500000, true, false, true, true, true, 12.5f, true));
+}
+
+TEST(V25, PpsFaultClearsOnlyAfterSecondOfValidReleasedPair) {
+	ReleasedPedalRecovery pps;
+	EXPECT_FALSE(pps.update(0, true, 0, 0));
+	EXPECT_FALSE(pps.update(900000, true, 0, 0));
+	EXPECT_FALSE(pps.update(950000, false, 0, 0));
+	EXPECT_FALSE(pps.update(1000000, true, 0, 0));
+	EXPECT_FALSE(pps.update(1950000, true, 0, 0));
+	EXPECT_TRUE(pps.update(2000000, true, 0, 0));
+	EXPECT_FALSE(pps.update(2050000, true, 2, 0));
+	EXPECT_FALSE(pps.update(2100000, true, 0, 0));
+}
+
+TEST(V25, CrankingCltIsOptInAndInvalidAxisFallsBack) {
+	struct SyntheticCranking {
+		uint16_t crankingAdvanceBins[4] = {0, 200, 400, 1000};
+		float crankingAdvance[4] = {1, 2, 3, 4};
+		uint32_t crankingAdvanceCltEnabled = 0;
+		int16_t crankingAdvanceCltBins[6]{};
+		float crankingAdvanceCltTable[6][4]{};
+	} cfg{};
+	initializeCrankingClt(cfg);
+	EXPECT_FALSE(crankingCltTableUsable(cfg, true, 20));
+	cfg.crankingAdvanceCltEnabled = 1;
+	EXPECT_TRUE(crankingCltTableUsable(cfg, true, 20));
+	EXPECT_FALSE(crankingCltTableUsable(cfg, false, 20));
+	cfg.crankingAdvanceCltBins[2] = -20;
+	EXPECT_FALSE(crankingCltTableUsable(cfg, true, 20));
+}
