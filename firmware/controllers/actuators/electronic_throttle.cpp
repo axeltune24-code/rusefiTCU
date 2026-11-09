@@ -225,6 +225,7 @@ void EtbController::reset(const char *reason) {
 	m_shouldResetPid = true;
 	etbTpsErrorCounter = 0;
 	etbPpsErrorCounter = 0;
+	m_ppsFaultRecovery.reset();
 #if EFI_UNIT_TEST
 	ebtResetCounter++;
 #endif // EFI_UNIT_TEST
@@ -605,7 +606,8 @@ bool EtbController::checkStatus() {
 	bool shouldCheckSensorFunction = engine->module<SensorChecker>()->analogSensorsShouldWork();
 
 	if (!m_isAutotune && shouldCheckSensorFunction) {
-		bool isTpsError = !Sensor::get(m_positionSensor).Valid;
+		auto tpsPosition = Sensor::get(m_positionSensor);
+		bool isTpsError = !tpsPosition.Valid;
 
 		// If we have an error that's new, increment the counter
 		if (isTpsError && !hadTpsError) {
@@ -614,18 +616,40 @@ bool EtbController::checkStatus() {
 
 		hadTpsError = isTpsError;
 
-		bool isPpsError = !Sensor::get(SensorType::AcceleratorPedal).Valid;
-
-		// If we have an error that's new, increment the counter
-		if (isPpsError && !hadPpsError) {
+		// Do not advance the PPS filter multiple times while validating the pair.
+		auto pedalPosition = Sensor::get(SensorType::AcceleratorPedal);
+		bool isPpsError = !pedalPosition.Valid;
+		if (isPpsError && !hadPpsError && etbPpsErrorCounter < UINT16_MAX) {
 			etbPpsErrorCounter++;
 		}
-
 		hadPpsError = isPpsError;
+		// Restore only the accumulated pedal fault after one continuous second
+		// of valid, redundant, released raw PPS channels and matching filters.
+		if (isEtbMode() && etbPpsErrorCounter != 0) {
+			auto primary = Sensor::get(SensorType::AcceleratorPedalPrimary);
+			auto secondary = Sensor::get(SensorType::AcceleratorPedalSecondary);
+			auto pair = Sensor::get(SensorType::AcceleratorPedalUnfiltered);
+			const bool eligible = !isTpsError && !isPpsError && pair.Valid
+				&& primary.Valid && secondary.Valid
+				&& std::isfinite(tpsPosition.Value)
+				&& std::isfinite(pedalPosition.Value) && std::isfinite(pair.Value)
+				&& pedalPosition.Value >= -1.0f && pedalPosition.Value <= 1.0f
+				&& pair.Value >= -1.0f && pair.Value <= 1.0f
+				&& Sensor::isRedundant(SensorType::AcceleratorPedal)
+				&& !engineConfiguration->useFordRedundantPps;
+			if (m_ppsFaultRecovery.update(getTimeNowUs(), eligible,
+				primary.value_or(0), secondary.value_or(0))) {
+				etbPpsErrorCounter = 0;
+				m_ppsFaultRecovery.reset();
+			}
+		} else {
+			m_ppsFaultRecovery.reset();
+		}
 	} else {
 		// Either sensors are expected to not work, or autotune is running, so reset the error counter
 		etbTpsErrorCounter = 0;
 		etbPpsErrorCounter = 0;
+		m_ppsFaultRecovery.reset();
 	}
 
 	EtbStatus localReason = EtbStatus::None;

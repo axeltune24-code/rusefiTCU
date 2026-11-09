@@ -1,79 +1,60 @@
 /**
  * @file stm32f7xx_rtc.cpp
- * @brief Real Time Clock STM32F7xx switched from LSE to LSI
- *
- * @date Jan 8, 2025
- * @author Andrey Gusakov
+ * @brief Preserve RTC calendar while recovering the STM32F7 LSE oscillator.
+ * Derived from the user's tested V25 source overlay.
  */
-
 #include "pch.h"
 
 #if HAL_USE_RTC
-
-/* switch to LSE clock if ECU previously falledback to LSI clock.
- * This will preserve current time and set it back to RTC after reinit
- * On STM32 change of RTC source clock can be done only through reset of whole backup domain
- * This reset does no affect backup ram */
-void hal_lld_rtc_fixup(void)
-{
-#if (STM32_RTCSEL == STM32_RTCSEL_LSE)
-	// we need some more time than defined in RUSEFI_STM32_LSE_WAIT_MAX
-	// this is safe as we check that LSE is runnig before reseting BKP domain (stopping LSE)
-	// After that we are starting LSE again and waiting for LSERDY.
-	int timeout = 1000000000;
-	if ((RCC->BDCR & STM32_RTCSEL_MASK) == STM32_RTCSEL) {
-		// Backup domain is already driven by expected clock
-		return;
-	}
-	if ((RCC->BDCR & RCC_BDCR_LSERDY) == 0) {
-		// LSE is failed to start
-		efiPrintf("LSE in not ready");
-		return;
-	}
-
-	efiPrintf("Switching RTC to LSE clock");
-
-	// Get current time
-	RTCDateTime timespec;
-	rtcGetTime(&RTCD1, &timespec);
-
-	// Reset BKP domain
-	// The BKPSRAM is not affected by this reset
-	// This will also reset LSEON
-	RCC->BDCR |= RCC_BDCR_BDRST;
-	RCC->BDCR &= ~RCC_BDCR_BDRST;
-
-#if defined(STM32_LSE_BYPASS)
-	// LSE Bypass.
-	RCC->BDCR |= STM32_LSEDRV | RCC_BDCR_LSEON | RCC_BDCR_LSEBYP;
-#else
-	// No LSE Bypass.
-	RCC->BDCR |= STM32_LSEDRV | RCC_BDCR_LSEON;
+#if STM32_RTCSEL == STM32_RTCSEL_LSE
+// Called after ChibiOS init and watchdog setup.
+static bool waitForF7Lse() {
+    for (unsigned i = 0; i < 200; ++i) {
+        if (RCC->BDCR & RCC_BDCR_LSERDY) return true;
+#if HAL_USE_WDG
+        wdgReset(&WDGD1);
 #endif
-	// Waits until LSE is stable or times out.
-	while (((RCC->BDCR & RCC_BDCR_LSERDY) == 0) && (timeout--)) {
-		//this is executed when RTOS is not ready
-		//chThdSleepMilliseconds(1);
-	}
+        chThdSleepMilliseconds(10);
+    }
+    return (RCC->BDCR & RCC_BDCR_LSERDY) != 0;
+}
+#endif
 
-	// Lets check again
-	if (RCC->BDCR & RCC_BDCR_LSERDY) {
-		RCC->BDCR |= STM32_RTCSEL;
-	} else {
-		// LSE is failed to start
-		efiPrintf("LSE in not ready after restart attemp");
-		// Keep initing
-	RCC->BDCR |= RUSEFI_STM32_LSE_WAIT_MAX_RTCSEL;
-	}
+void hal_lld_rtc_fixup(void) {
+#if STM32_RTCSEL == STM32_RTCSEL_LSE
+    if ((RCC->BDCR & STM32_RTCSEL_MASK) == STM32_RTCSEL) {
+        return;
+    }
+    if (!waitForF7Lse()) {
+        efiPrintf("RTC: LSE unavailable; retaining LSI (no battery timekeeping)");
+        return;
+    }
 
-	/* RTC clock enabled.*/
-	RCC->BDCR |= RCC_BDCR_RTCEN;
+    RTCDateTime timespec;
+    rtcGetTime(&RTCD1, &timespec);
+    const uint32_t backup0 = RTC->BKP0R;
+    const uint32_t backup1 = RTC->BKP1R;
+    const uint32_t backup2 = RTC->BKP2R;
+    const uint32_t backup3 = RTC->BKP3R;
+    const uint32_t lseMode = RCC->BDCR & RCC_BDCR_LSEBYP;
 
-	// init RTC again
-	rtcInit();
-	// Set previously saved time
-	rtcSetTime(&RTCD1, &timespec);
+    RCC->BDCR |= RCC_BDCR_BDRST;
+    RCC->BDCR &= ~RCC_BDCR_BDRST;
+    RCC->BDCR = lseMode | STM32_LSEDRV | RCC_BDCR_LSEON;
+
+    if (waitForF7Lse()) {
+        RCC->BDCR |= STM32_RTCSEL;
+    } else {
+        efiPrintf("RTC: LSE not ready after restart; falling back to LSI");
+        RCC->BDCR |= RUSEFI_STM32_LSE_WAIT_MAX_RTCSEL;
+    }
+    RCC->BDCR |= RCC_BDCR_RTCEN;
+    rtcInit();
+    rtcSetTime(&RTCD1, &timespec);
+    RTC->BKP0R = backup0;
+    RTC->BKP1R = backup1;
+    RTC->BKP2R = backup2;
+    RTC->BKP3R = backup3;
 #endif
 }
-
-#endif //HAL_USE_RTC
+#endif // HAL_USE_RTC

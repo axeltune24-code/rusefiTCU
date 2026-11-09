@@ -15,6 +15,7 @@
 #include "error_accumulator.h"
 #include "electronic_throttle_generated.h"
 #include "tunerstudio_calibration_channel.h"
+#include "pedal_fault_recovery.h"
 
 /**
  * Hard code ETB update speed.
@@ -104,6 +105,7 @@ private:
 	bool checkStatus();
 
 	Timer m_jamDetectTimer;
+	ReleasedPedalRecovery m_ppsFaultRecovery{};
 
 	// Pedal -> target map
 	const ValueProvider3D* m_pedalProvider = nullptr;
