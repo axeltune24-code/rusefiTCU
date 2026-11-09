@@ -238,7 +238,9 @@ static void processLastKnockEvent() {
 
 	// Freeze ADC window metadata before accepting another sample.
 	const auto lastKnockTime = lastKnockSampleTime;
+#if KNOCK_SPECTROGRAM
 	const auto channel = channelNumber;
+#endif
 
 #if KNOCK_SPECTROGRAM
 	static Timer spectrumTimer;
@@ -255,7 +257,9 @@ static void processLastKnockEvent() {
 		&& spectrumTimer.hasElapsedMs(50); // 20 frames per second max
 	if (renderSpectrum) {
 		spectrumTimer.reset();
-		knockFilter.cookSteadyState(engineConfiguration->adcVcc / 2);
+		// FFT must never mutate the active knock bandpass filter state.
+		Biquad spectrumFilter = knockFilter;
+		spectrumFilter.cookSteadyState(engineConfiguration->adcVcc / 2);
 		const size_t count = localCount < FFT_SIZE ? localCount : FFT_SIZE;
 		KnockWindow window(count);
 		for (size_t i = 0; i < FFT_SIZE; ++i) {
@@ -263,7 +267,7 @@ static void processLastKnockEvent() {
 			if (i < count) {
 				const float volts = ratio * sampleBuffer[i];
 				value = engineConfiguration->enableKnockSpectrogramFilter
-					? knockFilter.filter(volts)
+					? spectrumFilter.filter(volts)
 					: volts - engineConfiguration->adcVcc / 2;
 				value *= window.next() * engineConfiguration->knockSpectrumSensitivity;
 			}
