@@ -10,6 +10,7 @@
 #include "global_shared.h"
 #include "engine_module.h"
 #include "engine_state.h"
+#include "o2_heater_permission.h"
 #include "rpm_calculator.h"
 #include "event_registry.h"
 #include "table_helper.h"
@@ -411,6 +412,8 @@ public:
 #endif
 
 private:
+    // Runtime latch survives stalls and tuning changes, no flash write.
+    O2HeaterPermission m_o2HeaterPermission{};
     void injectEngineReferences();
 };
 

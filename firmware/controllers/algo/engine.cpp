@@ -166,7 +166,19 @@ void Engine::periodicSlowCallback() {
 		triggerCentral.vvtTriggerConfiguration[camIndex].update();
 	}
 
-  getEngineState()->heaterControlEnabled = engineConfiguration->forceO2Heating || engine->rpmCalculator.isRunning();
+  // Heater is an enable request only. The WBO's own dew point, voltage and
+	// temperature protection remain active. Invalid battery voltage fails closed.
+	const auto o2BatteryVoltage = Sensor::get(SensorType::BatteryVoltage);
+	const bool keySensedSeparately = Sensor::hasSensor(SensorType::IgnKeyVoltage)
+		|| isBrainPinValid(engineConfiguration->ignitionKeyDigitalPin);
+	const bool ignitionKnown = keySensedSeparately
+		? (isBrainPinValid(engineConfiguration->ignitionKeyDigitalPin)
+			|| bool(Sensor::get(SensorType::IgnKeyVoltage)))
+		: bool(o2BatteryVoltage);
+	getEngineState()->heaterControlEnabled = m_o2HeaterPermission.update(
+		getTimeNowUs(), engineConfiguration->forceO2Heating, engine->rpmCalculator.isRunning(),
+		isIgnVoltage(), ignitionKnown, o2BatteryVoltage.Valid,
+		o2BatteryVoltage.value_or(0), keySensedSeparately);
 	enginePins.o2heater.setValue(getEngineState()->heaterControlEnabled);
 	enginePins.starterRelayDisable.setValue(Sensor::getOrZero(SensorType::Rpm) < engineConfiguration->cranking.rpm);
 #endif // EFI_SHAFT_POSITION_INPUT
