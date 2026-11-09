@@ -84,9 +84,34 @@ void SimpleTransmissionController::updateLinePressure(gear_e gear) {
 		return;
 	}
 
-	// Preserve the established rusEFI airflow-based pressure axis. A standalone
-	// TCU needs a valid airflow estimate supplied by its ECU/CAN configuration.
-	float duty = interpolate2d(engine->engineState.airflowEstimate, config->tcu_pcAirmassBins, *pcts);
+	// The axis source is adjustable independently of the transmission type.
+	// This allows a standalone TCU to use throttle input, a fixed bench-test
+	// axis value, or the existing airflow estimate if available.
+	float axisValue = 0;
+	bool validLoad = true;
+	switch (engineConfiguration->tcuPcLoadSource) {
+	case 0:
+		axisValue = engine->engineState.airflowEstimate;
+		validLoad = std::isfinite(axisValue);
+		break;
+	case 1: {
+		auto throttle = Sensor::get(SensorType::DriverThrottleIntent);
+		validLoad = throttle.Valid;
+		if (validLoad) axisValue = throttle.Value;
+		break;
+	}
+	case 2:
+		axisValue = engineConfiguration->tcuPcFixedAxisValue;
+		break;
+	default:
+		validLoad = false;
+		break;
+	}
+
+	float duty = validLoad
+		? interpolate2d(axisValue, config->tcu_pcAirmassBins, *pcts)
+		: engineConfiguration->tcuPcInvalidSensorDuty;
+	if (!std::isfinite(duty)) duty = engineConfiguration->tcuPcInvalidSensorDuty;
 	if (duty < 0) duty = 0;
 	if (duty > 100) duty = 100;
 	pressureControlDuty = static_cast<int8_t>(duty);
