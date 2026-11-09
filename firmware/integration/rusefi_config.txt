@@ -180,6 +180,7 @@ struct_no_prefix engine_configuration_s
 #define CRANKING_FLEX_SIZE 4
 #define IDLE_ADVANCE_CURVE_SIZE 8
 #define CRANKING_ADVANCE_CURVE_SIZE 4
+#define CRANKING_ADVANCE_CLT_COUNT 6
 #define TRAILING_SPARK_SIZE 4
 #define TRAILING_SPARK_RPM_SIZE 4
 
@@ -2611,6 +2612,12 @@ include_file controllers/modules/fuel_pump/fuel_pump_tables.txt
 	gppwm_note_t[SCRIPT_SETTING_COUNT iterate] scriptSettingName;
 include_file controllers/modules/burst_knock/burst_knock_tables.txt
 include_file controllers/actuators/vvt_advanced_tables.txt
+
+// V25 opt-in absolute cranking advance RPM x coolant table. Stored in
+// persistent config, not in the transmission table or Lua page.
+uint32_t crankingAdvanceCltEnabled;0 uses the legacy cranking RPM curve. 1 uses absolute RPM x CLT advance in separate-table mode.;"", 1, 0, 0, 1, 0
+int16_t[CRANKING_ADVANCE_CLT_COUNT] crankingAdvanceCltBins;Coolant temperature axis for cranking advance;"C", 1, 0, -40, 150, 0
+int16_t[CRANKING_ADVANCE_CLT_COUNT x CRANKING_ADVANCE_CURVE_SIZE] autoscale crankingAdvanceCltTable;Absolute cranking ignition advance, not an additive correction;"deg", 0.01, 0, -20, 90, 2
 end_struct
 
 #define PPS_OK_INDICATOR "Pedal OK"

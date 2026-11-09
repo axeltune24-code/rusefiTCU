@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "../ignition/cranking_clt.h"
 
 #include "defaults.h"
 #include "table_helper.h"
@@ -88,6 +89,9 @@ void setDefaultCranking() {
 
 	static const float advanceBins[] = { 0, 200, 400, 1000 };
 	copyArray(config->crankingAdvanceBins, advanceBins);
+	// New feature must be disabled by default and its rows seeded with the
+	// existing RPM-only values to avoid changing legacy starting behavior.
+	initializeCrankingClt(*config);
 
 	engineConfiguration->useTLE8888_cranking_hack = true;
 }

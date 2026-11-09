@@ -19,6 +19,7 @@
  */
 
 #include "pch.h"
+#include "cranking_clt.h"
 
 #include "idle_thread.h"
 #include "launch_control.h"
@@ -237,6 +238,11 @@ angle_t getAdvanceCorrections(float engineLoad) {
 angle_t getCrankingAdvance(float rpm, float engineLoad) {
 	// get advance from the separate table for Cranking
 	if (engineConfiguration->useSeparateAdvanceForCranking) {
+		const auto clt = Sensor::get(SensorType::Clt);
+		if (crankingCltTableUsable(*config, clt.Valid, clt.value_or(0))) {
+			return interpolate3d(config->crankingAdvanceCltTable,
+				config->crankingAdvanceCltBins, clt.Value, config->crankingAdvanceBins, rpm);
+		}
 		return interpolate2d(rpm, config->crankingAdvanceBins, config->crankingAdvance);
 	}
 
