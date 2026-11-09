@@ -49,6 +49,7 @@ void SimpleTransmissionController::update(gear_e gear) {
 void SimpleTransmissionController::updateLinePressure(gear_e gear) {
 	if (gear != getCurrentGear()) {
 		pressureShiftFrom = getCurrentGear();
+		pressureShiftTimer.reset();
 		isShifting = true;
 		measureShiftTime(gear);
 	}
@@ -121,6 +122,11 @@ void SimpleTransmissionController::updateLinePressure(gear_e gear) {
 		float elapsed = isShiftCompleted();
 		if (elapsed != 0) {
 			lastShiftTime = elapsed;
+			isShifting = false;
+		} else if (config->tcu_shiftTime > 0 && pressureShiftTimer.hasElapsedMs(config->tcu_shiftTime)) {
+			// If detected gear does not arrive, the transition duty must not
+			// remain active indefinitely. Fall back to the steady gear curve.
+			lastShiftTime = config->tcu_shiftTime * 0.001f;
 			isShifting = false;
 		}
 	}
