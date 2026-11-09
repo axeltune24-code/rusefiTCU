@@ -14,7 +14,7 @@
 
 struct SpectrogramData {
 	fft::complex_type fftBuffer[FFT_SIZE];
-	float window[FFT_SIZE];
+
 };
 
 void initSoftwareKnock();
