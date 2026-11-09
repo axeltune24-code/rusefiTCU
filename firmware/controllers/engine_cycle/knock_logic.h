@@ -35,6 +35,8 @@ public:
 	virtual float getMaximumRetard() const = 0;
 
 private:
+	bool isSuppressed() const;
+	void clearResponse();
 	using PD = PeakDetect<float, MS2NT(50)>;
 	PD peakDetectors[MAX_CYLINDER_COUNT];
 	PD allCylinderPeakDetector;

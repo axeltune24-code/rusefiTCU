@@ -58,23 +58,25 @@ int getCylinderKnockBank(uint8_t cylinderNumber) {
 	 *    - Calculates fuel trim enrichment based on 'knockFuelTrimAggression'.
 	 *    - Clamps adjustments to configured maximums.
 	 */
-bool KnockControllerBase::onKnockSenseCompleted(uint8_t cylinderNumber, float dbv, efitick_t lastKnockTime) {
-	// A delayed ADC result must not reapply retard during STOPPED, CRANKING
-	// or SPINNING_UP, or with the throttle below the configured inhibit TPS.
-	// CLT is deliberately not part of this gate: a cold RUNNING engine is protected.
-	const bool inhibit = !engine->rpmCalculator.isRunning()
+bool KnockControllerBase::isSuppressed() const {
+	// Cold RUNNING engines remain protected; no CLT gate.
+	return !engine->rpmCalculator.isRunning()
 		|| Sensor::getOrZero(SensorType::Tps1) < engineConfiguration->knockSuppressMinTps;
-	if (inhibit) {
-		chibios_rt::CriticalSectionLocker csl;
-		m_knockRetard = 0;
-		m_knockFuelTrimMultiplier = 0;
-		return false;
-	}
+}
 
+void KnockControllerBase::clearResponse() {
+	// Only under the response critical section.
+	m_knockRetard = 0;
+	m_knockFuelTrimMultiplier = 0;
+	hasKnockRecently = false;
+	hasKnockRetardNow = false;
+}
+
+bool KnockControllerBase::onKnockSenseCompleted(uint8_t cylinderNumber, float dbv, efitick_t lastKnockTime) {
+	// Keep measured peaks observable even while knock response is suppressed.
+	// Accumulation eligibility is checked under the response lock below.
 	// Adjust by the user-configured gain for this cylinder
 	dbv += m_gain[cylinderNumber];
-
-	bool isKnock = dbv > m_knockThreshold;
 
 	// Per-cylinder peak detector
 	float cylPeak = peakDetectors[cylinderNumber].detect(dbv, lastKnockTime);
@@ -83,6 +85,13 @@ bool KnockControllerBase::onKnockSenseCompleted(uint8_t cylinderNumber, float db
 	// All-cylinders peak detector
 	m_knockLevel = allCylinderPeakDetector.detect(dbv, lastKnockTime);
 
+	chibios_rt::CriticalSectionLocker responseLock;
+	if (isSuppressed()) {
+		clearResponse();
+		return false;
+	}
+
+	const bool isKnock = dbv > m_knockThreshold;
 	if (isKnock) {
 		m_knockCount++;
 
@@ -113,16 +122,10 @@ bool KnockControllerBase::onKnockSenseCompleted(uint8_t cylinderNumber, float db
 		float trimFuelAmountPercent = trimFuelPercent * trimFuelFraction;
 		float trimFuelAmount = trimFuelAmountPercent / 100.f;
 
-		{
-			// Adjust knock retard under lock
-			chibios_rt::CriticalSectionLocker csl;
-
-			auto newRetard = m_knockRetard + retardAmount;
-			m_knockRetard = clampF(0.f, newRetard, m_maximumRetard);
-
-			auto newFuelTrim = m_knockFuelTrimMultiplier + trimFuelAmount;
-			m_knockFuelTrimMultiplier = clampF(0.f, newFuelTrim, maximumFuelTrim);
-		}
+		const auto newRetard = m_knockRetard + retardAmount;
+		m_knockRetard = clampF(0.f, newRetard, m_maximumRetard);
+		const auto newFuelTrim = m_knockFuelTrimMultiplier + trimFuelAmount;
+		m_knockFuelTrimMultiplier = clampF(0.f, newFuelTrim, maximumFuelTrim);
 	}
 
 	return isKnock;
@@ -155,14 +158,12 @@ void KnockControllerBase::onFastCallback() {
 
 	// Suppress while not RUNNING and below the calibrated TPS threshold.
 	// Do not early-return: thresholds and gain tables still refresh every tick.
-	const bool inhibit = !engine->rpmCalculator.isRunning()
-		|| Sensor::getOrZero(SensorType::Tps1) < engineConfiguration->knockSuppressMinTps;
+	const bool inhibit = isSuppressed();
 
 	{
 		chibios_rt::CriticalSectionLocker csl;
 		if (inhibit) {
-			m_knockRetard = 0;
-			m_knockFuelTrimMultiplier = 0;
+			clearResponse();
 		} else {
 			m_knockRetard = std::max(0.0f, m_knockRetard - applyRetardAmount);
 			m_knockFuelTrimMultiplier = std::max(0.0f, m_knockFuelTrimMultiplier - applyFuelAmount);
