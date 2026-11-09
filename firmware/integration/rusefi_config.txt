@@ -2294,12 +2294,18 @@ uint8_t[TCU_TABLE_WIDTH] tcu_pcVals1;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals2;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals3;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals4;;"%", 1, 0, 0, 255, 0
+uint8_t[TCU_TABLE_WIDTH] tcu_pcVals5;;"%", 1, 0, 0, 100, 0
+uint8_t[TCU_TABLE_WIDTH] tcu_pcVals6;;"%", 1, 0, 0, 100, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals12;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals23;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals34;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals21;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals32;;"%", 1, 0, 0, 255, 0
 uint8_t[TCU_TABLE_WIDTH] tcu_pcVals43;;"%", 1, 0, 0, 255, 0
+uint8_t[TCU_TABLE_WIDTH] tcu_pcVals45;;"%", 1, 0, 0, 100, 0
+uint8_t[TCU_TABLE_WIDTH] tcu_pcVals56;;"%", 1, 0, 0, 100, 0
+uint8_t[TCU_TABLE_WIDTH] tcu_pcVals54;;"%", 1, 0, 0, 100, 0
+uint8_t[TCU_TABLE_WIDTH] tcu_pcVals65;;"%", 1, 0, 0, 100, 0
 
 uint8_t[8] tcu_tccTpsBins;;"TPS", 1, 0, 0, 255, 0
 uint8_t[8] tcu_tccLockSpeed;;{bitStringValue(velocityUnitsLabels, useMetricOnInterface)}, {useMetricOnInterface ? 1 : @@UNITS_KMH_TO_MPH@@}, 0, {useMetricOnInterface ? 0 : 0}, {useMetricOnInterface ? 255 : 158}, 0
