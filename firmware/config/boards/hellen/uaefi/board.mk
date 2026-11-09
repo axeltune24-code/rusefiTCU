@@ -42,6 +42,8 @@ else
 	# Knock is available on F4, F7 and H74x/H75x while this board is populated with H723
 	# H723 has ADC3 of other type and there is no ChibiOS driver
 	DDEFS += -DEFI_SOFTWARE_KNOCK=TRUE -DSTM32_ADC_USE_ADC3=TRUE
+	# V25: include the bounded-rate diagnostic spectrum renderer (F4/F7).
+	DDEFS += -DKNOCK_SPECTROGRAM=TRUE
 endif
 
 # EGT chip
