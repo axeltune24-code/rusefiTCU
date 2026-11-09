@@ -566,3 +566,24 @@ TEST(fuelCut, requiresGear) {
 }
 
 #endif
+
+TEST(StateAwareDfco, MeasuredThrottleHysteresisBand) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setupStateAwareDfco();
+	engineConfiguration->coastingFuelCutTps = 2;
+
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 0);
+	EXPECT_TRUE(updateDfco());
+
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 2.10f);
+	EXPECT_TRUE(updateDfco()); // existing cut holds until 2.25%
+
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 2.26f);
+	EXPECT_FALSE(updateDfco());
+
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 2.10f);
+	EXPECT_FALSE(updateDfco()); // no re-entry above 2%
+
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 1.9f);
+	EXPECT_TRUE(updateDfco());
+}

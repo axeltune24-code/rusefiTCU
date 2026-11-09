@@ -59,6 +59,18 @@ int getCylinderKnockBank(uint8_t cylinderNumber) {
 	 *    - Clamps adjustments to configured maximums.
 	 */
 bool KnockControllerBase::onKnockSenseCompleted(uint8_t cylinderNumber, float dbv, efitick_t lastKnockTime) {
+	// A delayed ADC result must not reapply retard during STOPPED, CRANKING
+	// or SPINNING_UP, or with the throttle below the configured inhibit TPS.
+	// CLT is deliberately not part of this gate: a cold RUNNING engine is protected.
+	const bool inhibit = !engine->rpmCalculator.isRunning()
+		|| Sensor::getOrZero(SensorType::Tps1) < engineConfiguration->knockSuppressMinTps;
+	if (inhibit) {
+		chibios_rt::CriticalSectionLocker csl;
+		m_knockRetard = 0;
+		m_knockFuelTrimMultiplier = 0;
+		return false;
+	}
+
 	// Adjust by the user-configured gain for this cylinder
 	dbv += m_gain[cylinderNumber];
 
@@ -141,42 +153,23 @@ void KnockControllerBase::onFastCallback() {
 	auto applyRetardAmount = engineConfiguration->knockRetardReapplyRate * callbackPeriodSeconds;
 	auto applyFuelAmount = engineConfiguration->knockFuelTrimReapplyRate * 0.01f * callbackPeriodSeconds;
 
-	// disable knock suppression then deceleration
-	auto TPSValue = Sensor::getOrZero(SensorType::Tps1);
+	// Suppress while not RUNNING and below the calibrated TPS threshold.
+	// Do not early-return: thresholds and gain tables still refresh every tick.
+	const bool inhibit = !engine->rpmCalculator.isRunning()
+		|| Sensor::getOrZero(SensorType::Tps1) < engineConfiguration->knockSuppressMinTps;
 
 	{
-		// Adjust knock retard under lock
 		chibios_rt::CriticalSectionLocker csl;
-
-
-		 if(TPSValue < engineConfiguration->knockSuppressMinTps) {
-		 	m_knockRetard = 0.0;
-		 	m_knockFuelTrimMultiplier = 0.0;
-		 	return;
-		 }
-
-		// Reduce knock retard at the requested rate
-		float newRetard = m_knockRetard - applyRetardAmount;
-
-		// don't allow retard to go negative
-		if (newRetard < 0) {
+		if (inhibit) {
 			m_knockRetard = 0;
-		} else {
-			m_knockRetard = newRetard;
-		}
-
-		// Reduce fuel trim at the requested rate
-		float newTrim = m_knockFuelTrimMultiplier - applyFuelAmount;
-
-		// don't allow trim to go negative
-		if (newTrim < 0) {
 			m_knockFuelTrimMultiplier = 0;
 		} else {
-			m_knockFuelTrimMultiplier = newTrim;
+			m_knockRetard = std::max(0.0f, m_knockRetard - applyRetardAmount);
+			m_knockFuelTrimMultiplier = std::max(0.0f, m_knockFuelTrimMultiplier - applyFuelAmount);
 		}
 	}
 
-	hasKnockRecently = !m_lastKnockTimer.hasElapsedSec(0.5f);
+	hasKnockRecently = !inhibit && !m_lastKnockTimer.hasElapsedSec(0.5f);
 	hasKnockRetardNow = m_knockRetard > 0;
 
 	m_knockThreshold = getKnockThreshold();

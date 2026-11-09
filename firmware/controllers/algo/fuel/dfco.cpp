@@ -37,7 +37,13 @@ bool DfcoController::commonGuards() const {
 }
 
 bool DfcoController::overrunActive() const {
+	// On uaEFI / SuperuaEFI, use measured plate angle rather than pedal request.
+	// Other boards retain their original DriverThrottleIntent behavior.
+#if defined(HW_HELLEN_UAEFI) || defined(HW_HELLEN_SUPER_UAEFI)
+	const auto tps = Sensor::get(SensorType::Tps1);
+#else
 	const auto tps = Sensor::get(SensorType::DriverThrottleIntent);
+#endif
 	if (!tps) {
 		return false;
 	}
@@ -48,7 +54,11 @@ bool DfcoController::overrunActive() const {
 	float rpm = Sensor::getOrZero(SensorType::Rpm);
 	float vss = Sensor::getOrZero(SensorType::VehicleSpeed);
 
-	bool tpsActivate = tps.Value < engineConfiguration->coastingFuelCutTps;
+	// A 0.25 percentage-point hold band avoids chatter at the calibrated limit.
+	// Entry remains at the original threshold; no additional entry delay.
+	const float tpsLimit = engineConfiguration->coastingFuelCutTps
+		+ (m_isDfco ? 0.25f : 0.0f);
+	bool tpsActivate = tps.Value < tpsLimit;
 
 	bool rpmActivate = (rpm > engineConfiguration->coastingFuelCutRpmHigh);
 	bool rpmDeactivate = (rpm < engineConfiguration->coastingFuelCutRpmLow);
@@ -73,6 +83,18 @@ bool DfcoController::getState(const EngineStateMachine& sm) const {
 	if (!commonGuards()) {
 		return false;
 	}
+
+#if defined(HW_HELLEN_UAEFI) || defined(HW_HELLEN_SUPER_UAEFI)
+	// When an actual accelerator pedal is installed, any invalid reading or
+	// 1%+ pedal demand immediately cancels both Overrun and Decel fuel cut.
+	// Do not infer a released pedal from an invalid sensor.
+	if (Sensor::hasSensor(SensorType::AcceleratorPedal)) {
+		const auto pedal = Sensor::get(SensorType::AcceleratorPedal);
+		if (!pedal || pedal.Value >= 1.0f) {
+			return false;
+		}
+	}
+#endif
 
 	auto mode = engineConfiguration->dfcoFuelCutMode;
 	bool wantsOverrun = mode == dfco_fuel_cut_mode_e::Overrun || mode == dfco_fuel_cut_mode_e::Both;

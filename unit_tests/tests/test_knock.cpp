@@ -73,6 +73,7 @@ TEST(Knock, SensingEnabledOnBurn) {
 
 TEST(Knock, Retards) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->rpmCalculator.setRpmValue(2000);
 
 	// Aggression of 10%
 	engineConfiguration->knockRetardAggression = 10;
@@ -114,6 +115,7 @@ TEST(Knock, Retards) {
 
 TEST(Knock, Reapply) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->rpmCalculator.setRpmValue(2000);
 	setArrayValues(engine->engineState.timingAdvance, 0.0f);
 
 	// disable suppress for test
@@ -160,6 +162,7 @@ TEST(Knock, Reapply) {
 
 TEST(Knock, FuelTrim) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->rpmCalculator.setRpmValue(2000);
 	setArrayValues(engine->engineState.timingAdvance, 0.0f);
 
 	// Aggression of 10%
@@ -200,6 +203,7 @@ TEST(Knock, FuelTrim) {
 
 TEST(Knock, FuelTrimReapply) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->rpmCalculator.setRpmValue(2000);
 	setArrayValues(engine->engineState.timingAdvance, 0.0f);
 
 	// disable suppress for test
@@ -247,4 +251,40 @@ TEST(Knock, FuelTrimReapply) {
 
 	// Should have no knock retard
 	EXPECT_FLOAT_EQ(dut.getFuelTrimMultiplier(), 1.0);
+}
+
+TEST(Knock, SuppressesRetardDuringCrankingAndLowTps) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engineConfiguration->knockSuppressMinTps = 2;
+	engineConfiguration->knockRetardAggression = 10;
+	setArrayValues(engine->engineState.timingAdvance, 0.0f);
+
+	MockKnockController dut;
+	dut.onFastCallback();
+	dut.onKnockSenseCompleted(0, 30, 0);
+	EXPECT_FLOAT_EQ(0, dut.getKnockRetard());
+
+	engine->rpmCalculator.setRpmValue(200);
+	Sensor::setMockValue(SensorType::Tps1, 10);
+	dut.onFastCallback();
+	dut.onKnockSenseCompleted(0, 30, 0);
+	EXPECT_FLOAT_EQ(0, dut.getKnockRetard());
+
+	engine->rpmCalculator.setRpmValue(2000);
+	Sensor::setMockValue(SensorType::Tps1, 1);
+	dut.onFastCallback();
+	dut.onKnockSenseCompleted(0, 30, 0);
+	EXPECT_FLOAT_EQ(0, dut.getKnockRetard());
+
+	Sensor::setMockValue(SensorType::Tps1, 10);
+	dut.onFastCallback();
+	dut.onKnockSenseCompleted(0, 30, 0);
+	EXPECT_GT(dut.getKnockRetard(), 0);
+
+	engine->rpmCalculator.setRpmValue(0);
+	dut.onFastCallback();
+	EXPECT_FLOAT_EQ(0, dut.getKnockRetard());
+	EXPECT_FLOAT_EQ(1, dut.getFuelTrimMultiplier());
+	dut.onKnockSenseCompleted(0, 30, 0);
+	EXPECT_FLOAT_EQ(0, dut.getKnockRetard());
 }
