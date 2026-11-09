@@ -15,6 +15,7 @@
 #include "idle_state_generated.h"
 #include "closed_loop_idle.h"
 #include "biquad.h"
+#include "post_start_air.h"
 
 struct IIdleController {
 	enum class Phase : uint8_t {
@@ -140,6 +141,7 @@ private:
 	Pid m_timingPid;
 	float m_modeledFlowIdleTiming = 0;
 	Biquad m_timingHpf;
+	PostStartAir m_postStartAir{};
 };
 
 percent_t getIdlePosition();

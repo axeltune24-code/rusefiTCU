@@ -145,6 +145,9 @@ IIdleController::Phase IdleController::determinePhase(float rpm, IIdleController
  * cranking IAC position into running open-loop position.
  */
 float IdleController::getCrankingTaperFraction(float clt) const {
+	if (PostStartAir::configured(config->postStartAirHoldSec, config->postStartAirDecaySec)) {
+		return m_postStartAir.fraction();
+	}
   	float taperDuration = interpolate2d(clt, config->afterCrankingIACtaperDurationBins, config->afterCrankingIACtaperDuration);
 	return (float)engine->rpmCalculator.getRevolutionCounterSinceStart() / taperDuration;
 }
@@ -336,7 +339,10 @@ float IdleController::getClosedLoop(IIdleController::Phase phase, float tpsPos, 
 
 	efitimeus_t nowUs = getTimeNowUs();
 
-	isIdleClosedLoop = phase == IIdleController::Phase::Idling;
+	const bool startCatch = phase == IIdleController::Phase::CrankToIdleTaper
+		&& PostStartAir::configured(config->postStartAirHoldSec, config->postStartAirDecaySec)
+		&& m_postStartAir.allowIdleCatch(rpm, targetRpm);
+	isIdleClosedLoop = phase == IIdleController::Phase::Idling || startCatch;
 
 	if (!isIdleClosedLoop) {
 		// Don't store old I and D terms if PID doesn't work anymore.
@@ -349,6 +355,11 @@ float IdleController::getClosedLoop(IIdleController::Phase phase, float tpsPos, 
 		return 0;
 	}
 
+	if (startCatch && wasResetPid) {
+		restoreAfterPidResetTimeUs = nowUs;
+		shouldResetPid = false;
+		wasResetPid = false;
+	}
 	bool acToggleJustTouched = engine->module<AcController>().unmock().timeSinceStateChange.getElapsedSeconds() < 0.5f /*second*/;
 	// check if within the dead zone
 	isInDeadZone = !acToggleJustTouched && std::abs(rpm - targetRpm) <= engineConfiguration->idlePidRpmDeadZone;
@@ -378,7 +389,8 @@ float IdleController::getClosedLoop(IIdleController::Phase phase, float tpsPos, 
 	// If errorAmpCoef > 1.0, then PID thinks that RPM is lower than it is, and controls IAC more aggressively
 	idlePid->setErrorAmplification(errorAmpCoef);
 
-	percent_t newValue = idlePid->getOutput(targetRpm, rpm, FAST_CALLBACK_PERIOD_MS / 1000.0f);
+	const float controlTarget = startCatch && rpm > targetRpm ? rpm : targetRpm;
+	percent_t newValue = idlePid->getOutput(controlTarget, rpm, FAST_CALLBACK_PERIOD_MS / 1000.0f);
 	idleState = PID_VALUE;
 
 	// the state of PID has been changed, so we might reset it now, but only when needed (see idlePidDeactivationTpsThreshold)
@@ -402,6 +414,7 @@ float IdleController::getClosedLoop(IIdleController::Phase phase, float tpsPos, 
 	// which could give unstable results.
 	newValue = interpolateClamped(0, newValue, engineConfiguration->idlePidDeactivationTpsThreshold, 0, tpsPos);
 
+	if (startCatch && newValue < 0) newValue = 0;
 	m_lastAutomaticPosition = newValue;
 	return newValue;
 }
@@ -436,8 +449,16 @@ float IdleController::getIdlePosition(float rpm) {
 		getIdlePid()->iTermMax = engineConfiguration->idlerpmpid_iTermMax;
 
 		// On failed sensor, use 0 deg C - should give a safe highish idle
-		float clt = Sensor::getOrZero(SensorType::Clt);
+		auto cltSensor = Sensor::get(SensorType::Clt);
+		float clt = cltSensor.value_or(0);
 		auto tps = Sensor::get(SensorType::DriverThrottleIntent);
+		const float vehicleSpeed = Sensor::getOrZero(SensorType::VehicleSpeed);
+		bool driving = tps && tps.Value > engineConfiguration->idlePidDeactivationTpsThreshold;
+		driving |= engineConfiguration->maxIdleVss != 0 && vehicleSpeed > engineConfiguration->maxIdleVss;
+		m_postStartAir.update(getTimeNowUs(), engine->rpmCalculator.isStopped(),
+			engine->rpmCalculator.isCranking(), engine->rpmCalculator.isRunning(),
+			tps.Valid && std::isfinite(tps.Value) && bool(cltSensor) && std::isfinite(clt) && !useModeledFlow,
+			driving, config->postStartAirHoldSec, config->postStartAirDecaySec);
 
 		// Compute the target we're shooting for
 		auto targetRpm = getTargetRpm(clt);
@@ -447,7 +468,6 @@ float IdleController::getIdlePosition(float rpm) {
 		float crankingTaper = useModeledFlow ? 1 : getCrankingTaperFraction(clt);
 
 		// Determine what operation phase we're in - idling or not
-		float vehicleSpeed = Sensor::getOrZero(SensorType::VehicleSpeed);
 		auto phase = determinePhase(rpm, targetRpm, tps, vehicleSpeed, crankingTaper);
 
 		// update TS flag
@@ -547,6 +567,10 @@ void IdleController::onFastCallback() {
 
 void IdleController::onEngineStop() {
 	getIdlePid()->reset();
+	m_postStartAir.reset();
+	m_crankTaperEndTime = 0;
+	m_idleTimingSoftEntryEndTime = 0;
+	restoreAfterPidResetTimeUs = 0;
 }
 
 void IdleController::onConfigurationChange(engine_configuration_s const * previousConfiguration) {
